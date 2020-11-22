@@ -1,0 +1,56 @@
+---
+version: 2.1
+jobs:
+  build:
+    parameters:
+      version:
+        type: string
+        default: 0.0.${CIRCLE_BUILD_NUM}
+    environment:
+      IMAGE_NAME: rvodden/pysketcher-build
+    docker:
+      - image: docker:19.03.13
+    working_directory: /app
+    steps:
+      - checkout
+      - setup_remote_docker
+      - restore_cache:
+          keys:
+            - v1-{{ .Branch  }}
+          paths:
+            - /caches/pysketch-build.tar
+      - run:
+          name: Load Docker image layer cache
+          command: |
+            set +o pipefail
+            docker load -i /caches/pysketcher-build.tgz | true
+      - run:
+          name: Build application Docker image
+          command: |
+            docker build --cache-from=${IMAGE_NAME}:latest -t ${IMAGE_NAME}:latest --build-arg VERSION="<< parameters.version >>" .
+      - run:
+          name: Save Docker image to tarfile
+          command: |
+            mkdir -p /caches
+            docker save -o /caches/pysketch-build.tar ${IMAGE_NAME}:latest
+      - save_cache:
+          key: v1-{{ .Branch }}-{{ epoch }}
+          paths:
+            - /caches/pysketcher-build.tgz
+      - deploy:
+          name: Push application Docker image
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "docker" ]; then
+              docker login -u "${DOCKERHUB_USERNAME}" -p "${DOCKERHUB_PASSWORD}"
+              docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:<< parameters.version >>
+              docker push ${IMAGE_NAME}:latest
+              docker push ${IMAGE_NAME}:<< parameters.version >>
+            fi
+workflows:
+  version: 2
+  workflow:
+    jobs:
+      - build:
+          filters:
+            branches:
+              only: docker
